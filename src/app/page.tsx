@@ -860,7 +860,7 @@ export default function HomePage() {
                   Built for crypto natives
                 </h2>
                 <p className="text-muted-foreground max-w-md mx-auto">
-                  Whether you're filing taxes or tracking a whale, we've got you covered.
+                  Whether you&apos;re filing taxes or tracking a whale, we&apos;ve got you covered.
                 </p>
               </motion.div>
 

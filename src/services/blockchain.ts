@@ -757,8 +757,30 @@ async function fetchCosmosTransactions(
       const data = await res.json();
       const txs = data.tx_responses || [];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const transactions: Transaction[] = txs.map((tx: any) => {
+      // Cosmos API response type
+      interface CosmosTx {
+        txhash: string;
+        height: string;
+        timestamp: string;
+        code: number;
+        gas_used: string;
+        tx?: {
+          body?: {
+            messages?: Array<{
+              "@type"?: string;
+              to_address?: string;
+              amount?: Array<{ amount: string; denom: string }>;
+            }>;
+          };
+          auth_info?: {
+            fee?: {
+              amount?: Array<{ amount: string }>;
+            };
+          };
+        };
+      }
+
+      const transactions: Transaction[] = (txs as CosmosTx[]).map((tx) => {
         const txBody = tx.tx?.body || {};
         const msgs = txBody.messages || [];
         let value = "0";
@@ -786,19 +808,19 @@ async function fetchCosmosTransactions(
 
         return {
           id: `${chainId}-${tx.txhash}`,
-          hash: tx.txhash as string,
+          hash: tx.txhash,
           chain: chainId,
-          blockNumber: parseInt(tx.height as string),
-          timestamp: new Date(tx.timestamp as string).getTime() / 1000,
+          blockNumber: parseInt(tx.height),
+          timestamp: new Date(tx.timestamp).getTime() / 1000,
           from: address,
           to,
           value,
           fee,
           type,
-          status: (tx.code as number) === 0 ? "success" : "failed",
+          status: tx.code === 0 ? "success" : "failed",
           tokenSymbol: chain.symbol,
-          gasUsed: tx.gas_used as string,
-          raw: tx,
+          gasUsed: tx.gas_used,
+          raw: tx as unknown as Record<string, unknown>,
         };
       });
 
