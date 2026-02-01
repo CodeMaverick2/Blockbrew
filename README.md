@@ -61,27 +61,29 @@ npm start
 
 ### EVM Compatible (Multi-Chain Search)
 
-| Chain | Symbol | API Source |
-|-------|--------|------------|
-| Ethereum | ETH | Blockscout |
-| Polygon | MATIC | Blockscout |
-| Arbitrum | ETH | Blockscout |
-| Optimism | ETH | Blockscout |
-| Base | ETH | Blockscout |
-| BNB Chain | BNB | BSCScan |
-| Avalanche | AVAX | Snowtrace |
+| Chain | Symbol | Primary API | Fallback | Status |
+|-------|--------|-------------|----------|--------|
+| Ethereum | ETH | [Blockscout](https://eth.blockscout.com) | [Routescan](https://routescan.io) | ✅ Free |
+| Polygon | MATIC | [Blockscout](https://polygon.blockscout.com) | [Routescan](https://routescan.io) | ✅ Free |
+| Arbitrum | ETH | [Blockscout](https://arbitrum.blockscout.com) | [Routescan](https://routescan.io) | ✅ Free |
+| Optimism | ETH | [Blockscout](https://optimism.blockscout.com) | [Routescan](https://routescan.io) | ✅ Free |
+| Base | ETH | [Blockscout](https://base.blockscout.com) | [Routescan](https://routescan.io) | ✅ Free |
+| BNB Chain | BNB | [Etherscan V2](https://etherscan.io) | - | ⚠️ API Key Required |
+| Avalanche | AVAX | [Routescan](https://routescan.io) | Etherscan V2 | ✅ Free |
+
+> **Note**: BSC/BNB Chain requires an Etherscan API key since BSCScan deprecated their free tier in December 2025.
 
 ### Other Networks
 
-| Chain | Symbol | API Source |
-|-------|--------|------------|
-| Solana | SOL | Solana RPC |
-| Bitcoin | BTC | Blockchair |
-| Polkadot | DOT | Subscan |
-| Cosmos | ATOM | Cosmostation |
-| Osmosis | OSMO | Cosmostation |
-| Bittensor | TAO | Subscan |
-| Ronin | RON | Ronin Explorer |
+| Chain | Symbol | Primary API | Fallback | Status |
+|-------|--------|-------------|----------|--------|
+| Solana | SOL | [Solana RPC](https://solana.com/docs/rpc) | - | ✅ Free |
+| Bitcoin | BTC | [Mempool.space](https://mempool.space) | Blockchair, Blockchain.info | ✅ Free |
+| Polkadot | DOT | [Subscan](https://polkadot.subscan.io) | - | ✅ Free tier |
+| Cosmos | ATOM | [PublicNode](https://cosmos-rest.publicnode.com) | Cosmos Directory | ✅ Free |
+| Osmosis | OSMO | [PublicNode](https://osmosis-rest.publicnode.com) | Cosmos Directory | ✅ Free |
+| Bittensor | TAO | [Subscan](https://bittensor.subscan.io) | - | ⚠️ Limited |
+| Ronin | RON | Ronin Explorer | - | ✅ Free (may rate limit) |
 
 ## Export Formats
 
@@ -169,16 +171,31 @@ blockbrew/
 
 ## Configuration
 
-The application works without API keys using public endpoints. For production deployments with higher rate limits, you can optionally configure API keys in `.env.local`:
+The application works without API keys for 12 of 14 chains using free public APIs. For full chain coverage and higher rate limits, you can configure API keys in `.env.local`:
 
 ```env
-# Optional API keys for higher rate limits
-ETHERSCAN_API_KEY=your_key
-POLYGONSCAN_API_KEY=your_key
-BSCSCAN_API_KEY=your_key
+# Etherscan API V2 (https://etherscan.io/apis)
+# Required for: BSC/BNB Chain
+# Enhances: All EVM chains as fallback
+NEXT_PUBLIC_ETHERSCAN_API_KEY=your_key
+
+# Subscan API Key (https://support.subscan.io/)
+# Enhances: Polkadot, Bittensor (higher rate limits)
+NEXT_PUBLIC_SUBSCAN_API_KEY=your_key
 ```
 
-See `.env.example` for all available options.
+### API Sources Used
+
+| Provider | Chains | Rate Limit | Key Required |
+|----------|--------|------------|--------------|
+| [Blockscout](https://docs.blockscout.com) | ETH, Polygon, Arbitrum, Optimism, Base | Unlimited | No |
+| [Routescan](https://routescan.io) | All EVM except BSC | 2 RPS, 10K/day | No |
+| [Mempool.space](https://mempool.space/docs/api) | Bitcoin | Generous | No |
+| [Solana RPC](https://solana.com/docs/rpc) | Solana | Unlimited | No |
+| [Subscan](https://subscan.io) | Polkadot, Bittensor | Free tier | Optional |
+| [Etherscan V2](https://etherscan.io) | All EVM (50+ chains) | Per plan | Yes |
+
+See `.env.example` for complete configuration details.
 
 ## Deployment
 

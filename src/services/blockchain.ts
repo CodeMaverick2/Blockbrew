@@ -5,6 +5,21 @@ import {
 } from "@/types";
 import { CHAIN_MAP } from "@/config/chains";
 
+// API Keys from environment (optional - app works without them)
+const ETHERSCAN_API_KEY = process.env.NEXT_PUBLIC_ETHERSCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "";
+const SUBSCAN_API_KEY = process.env.NEXT_PUBLIC_SUBSCAN_API_KEY || process.env.SUBSCAN_API_KEY || "";
+
+// Chain IDs for EVM networks
+const EVM_CHAIN_IDS: Record<string, number> = {
+  ethereum: 1,
+  polygon: 137,
+  arbitrum: 42161,
+  optimism: 10,
+  base: 8453,
+  bsc: 56,
+  avalanche: 43114,
+};
+
 // Helper to determine transaction type
 function getTransactionType(method?: string, value?: string): TransactionType {
   if (!method) {
@@ -25,72 +40,103 @@ function getTransactionType(method?: string, value?: string): TransactionType {
   return "contract";
 }
 
-// Multiple API endpoints per chain for fallback
+/**
+ * Endpoint Configuration
+ * Priority: Free public APIs first, then APIs requiring keys
+ *
+ * Sources:
+ * - Blockscout: Free, open-source, 1000+ EVM chains (https://docs.blockscout.com)
+ * - Routescan: Free tier 2 RPS, 10K daily (https://routescan.io)
+ * - Etherscan V2: Paid, 50+ chains with single key (https://etherscan.io)
+ * - Mempool.space: Free Bitcoin API (https://mempool.space/docs/api)
+ * - Blockchair: Free tier with limits (https://blockchair.com/api/docs)
+ * - Subscan: Substrate chains (https://subscan.io)
+ */
 const CHAIN_ENDPOINTS: Record<string, string[]> = {
-  // EVM Chains - Blockscout + alternatives
+  // EVM Chains - Blockscout (free) -> Routescan (free) -> Etherscan V2 (key needed)
   ethereum: [
     "https://eth.blockscout.com",
-    "https://api.etherscan.io/api",
+    "routescan",
+    "etherscan-v2",
   ],
   polygon: [
     "https://polygon.blockscout.com",
-    "https://api.polygonscan.com/api",
+    "routescan",
+    "etherscan-v2",
   ],
   arbitrum: [
     "https://arbitrum.blockscout.com",
-    "https://api.arbiscan.io/api",
+    "routescan",
+    "etherscan-v2",
   ],
   optimism: [
     "https://optimism.blockscout.com",
-    "https://api-optimistic.etherscan.io/api",
+    "routescan",
+    "etherscan-v2",
   ],
   base: [
     "https://base.blockscout.com",
-    "https://api.basescan.org/api",
+    "routescan",
+    "etherscan-v2",
   ],
   bsc: [
-    "https://api.bscscan.com/api",
-    "https://bsc.blockscout.com",
+    // BSC - BSCScan deprecated free tier in Dec 2025
+    // Requires Etherscan API V2 key for access
+    "etherscan-v2",
   ],
   avalanche: [
-    "https://api.snowtrace.io/api",
-    "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+    "https://43114.routescan.io", // Avalanche-specific Routescan
+    "routescan",
+    "etherscan-v2",
   ],
-  // Solana - official RPC first (most reliable)
+
+  // Solana - Official RPC + Helius (free tier available)
   solana: [
     "https://api.mainnet-beta.solana.com",
+    "https://rpc.helius.xyz/?api-key=demo", // Helius free demo
   ],
-  // Bitcoin
+
+  // Bitcoin - Mempool.space (free) + Blockchair (free tier) + Blockchain.info
   bitcoin: [
+    "https://mempool.space/api",
     "https://api.blockchair.com/bitcoin",
     "https://blockchain.info",
   ],
-  // Substrate chains
+
+  // Substrate chains - Subscan (free tier with optional API key)
   polkadot: [
     "https://polkadot.api.subscan.io",
   ],
   bittensor: [
     "https://bittensor.api.subscan.io",
   ],
-  // Cosmos ecosystem
+
+  // Cosmos ecosystem - Multiple public LCD endpoints
   cosmos: [
     "https://cosmos-rest.publicnode.com",
     "https://rest.cosmos.directory/cosmoshub",
     "https://lcd-cosmoshub.keplr.app",
+    "https://api.cosmos.network",
   ],
   osmosis: [
     "https://osmosis-rest.publicnode.com",
     "https://rest.cosmos.directory/osmosis",
     "https://lcd-osmosis.keplr.app",
   ],
-  // Ronin
+
+  // Ronin - Official explorer
   ronin: [
+    "https://explorer-kintsugi.roninchain.com",
     "https://explorer.roninchain.com",
   ],
 };
 
-// Generic fetch with timeout
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 15000): Promise<Response> {
+// Generic fetch with timeout and retry
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout = 15000
+): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -156,7 +202,7 @@ function parseBlockscoutResponse(
   return transactions;
 }
 
-// Parse Etherscan-style API response
+// Parse Etherscan-style API response (works for Etherscan, Routescan, BSCScan, etc.)
 function parseEtherscanResponse(
   data: { result?: unknown[] },
   chainId: string,
@@ -197,7 +243,7 @@ function parseEtherscanResponse(
   return transactions;
 }
 
-// Fetch EVM transactions with fallback
+// Fetch EVM transactions with multiple fallbacks
 async function fetchEVMTransactions(
   address: string,
   chainId: string,
@@ -215,15 +261,30 @@ async function fetchEVMTransactions(
 
   for (const endpoint of endpoints) {
     try {
-      // Determine API type based on URL
+      // Determine API type
       const isBlockscout = endpoint.includes("blockscout");
-      const isEtherscan = endpoint.includes("scan") || endpoint.includes("etherscan") || endpoint.includes("snowtrace") || endpoint.includes("routescan");
+      const isRoutescan = endpoint === "routescan";
+      const isEtherscanV2 = endpoint === "etherscan-v2";
+      const isEtherscanStyle = !isBlockscout && !isRoutescan && !isEtherscanV2 &&
+        (endpoint.includes("scan") || endpoint.includes("etherscan"));
 
       let url: string;
+
       if (isBlockscout) {
         url = `${endpoint}/api/v2/addresses/${address}/transactions`;
-      } else if (isEtherscan) {
+      } else if (isRoutescan) {
+        const evmChainId = EVM_CHAIN_IDS[chainId];
+        if (!evmChainId) continue;
+        url = `https://api.routescan.io/v2/network/mainnet/evm/${evmChainId}/etherscan/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc`;
+      } else if (isEtherscanV2) {
+        const evmChainId = EVM_CHAIN_IDS[chainId];
+        if (!evmChainId || !ETHERSCAN_API_KEY) continue;
+        url = `https://api.etherscan.io/v2/api?chainid=${evmChainId}&module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc&apikey=${ETHERSCAN_API_KEY}`;
+      } else if (isEtherscanStyle) {
         url = `${endpoint}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc`;
+      } else if (endpoint.includes("routescan.io")) {
+        // Direct routescan URL (like Avalanche)
+        url = `${endpoint}/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc`;
       } else {
         continue;
       }
@@ -254,11 +315,11 @@ async function fetchEVMTransactions(
 
       if (isBlockscout) {
         transactions = parseBlockscoutResponse(data, address, chainId, chain);
-      } else {
-        // Etherscan-style response
+      } else if (isRoutescan || isEtherscanV2 || isEtherscanStyle || endpoint.includes("routescan.io")) {
+        // Check for error response
         if (data.status !== "1" && data.message !== "No transactions found") {
-          if (data.message === "NOTOK" || data.result?.includes?.("rate")) {
-            lastError = new Error("Rate limited or API key required");
+          if (data.message === "NOTOK" || data.result?.includes?.("rate") || data.message?.includes?.("not supported")) {
+            lastError = new Error(data.message || "API error");
             continue;
           }
           if (data.result?.length === 0 || data.message === "No transactions found") {
@@ -268,10 +329,12 @@ async function fetchEVMTransactions(
           continue;
         }
         transactions = parseEtherscanResponse(data, chainId, chain);
+      } else {
+        continue;
       }
 
-      // Also try to fetch token transfers for Blockscout
-      if (isBlockscout) {
+      // Fetch token transfers for Blockscout (enhances results)
+      if (isBlockscout && transactions.length > 0) {
         try {
           const tokenRes = await fetchWithTimeout(
             `${endpoint}/api/v2/addresses/${address}/token-transfers`,
@@ -320,7 +383,7 @@ async function fetchEVMTransactions(
             }
           }
         } catch {
-          // Token transfers are optional
+          // Token transfers are optional enhancement
         }
       }
 
@@ -345,12 +408,11 @@ async function fetchEVMTransactions(
     }
   }
 
-  // All endpoints failed
   console.error(`All ${chainId} endpoints failed:`, lastError);
   throw lastError || new Error(`Failed to fetch from ${chain.name}`);
 }
 
-// Solana Fetcher with multiple endpoints
+// Solana Fetcher - Official RPC with fallbacks
 async function fetchSolanaTransactions(
   address: string,
   page: number = 1,
@@ -380,7 +442,7 @@ async function fetchSolanaTransactions(
       const data = await res.json();
 
       if (data.error) {
-        if (data.error.code === 403 || data.error.code === 429) {
+        if (data.error.code === 403 || data.error.code === 429 || data.error.code === -32602) {
           lastError = new Error(data.error.message);
           continue;
         }
@@ -401,6 +463,7 @@ async function fetchSolanaTransactions(
         type: sig.err ? "unknown" : "transfer",
         status: sig.err ? "failed" : "success",
         tokenSymbol: "SOL",
+        memo: sig.memo as string,
         raw: sig,
       }));
 
@@ -422,7 +485,7 @@ async function fetchSolanaTransactions(
   throw lastError || new Error("Failed to fetch Solana transactions");
 }
 
-// Bitcoin Fetcher with fallback
+// Bitcoin Fetcher - Mempool.space (primary) + Blockchair + Blockchain.info
 async function fetchBitcoinTransactions(
   address: string,
   page: number = 1,
@@ -433,33 +496,79 @@ async function fetchBitcoinTransactions(
 
   for (const baseUrl of endpoints) {
     try {
-      let url: string;
-      if (baseUrl.includes("blockchair")) {
-        url = `${baseUrl}/dashboards/address/${address}?limit=${pageSize}`;
-      } else if (baseUrl.includes("blockchain.info")) {
-        url = `${baseUrl}/rawaddr/${address}?limit=${pageSize}`;
-      } else {
-        continue;
-      }
-
-      const res = await fetchWithTimeout(url);
-
-      if (!res.ok) {
-        lastError = new Error(`HTTP ${res.status}`);
-        continue;
-      }
-
-      const data = await res.json();
-
       let transactions: Transaction[] = [];
 
-      if (baseUrl.includes("blockchair")) {
+      if (baseUrl.includes("mempool.space")) {
+        // Mempool.space API - returns 25 txs per page
+        const url = `${baseUrl}/address/${address}/txs`;
+        const res = await fetchWithTimeout(url);
+
+        if (!res.ok) {
+          lastError = new Error(`HTTP ${res.status}`);
+          continue;
+        }
+
+        const txs = await res.json();
+
+        transactions = txs.slice(0, pageSize).map((tx: Record<string, unknown>) => {
+          // Calculate value (sum of outputs to this address minus inputs from this address)
+          const vout = tx.vout as Array<{ scriptpubkey_address?: string; value?: number }> || [];
+          const vin = tx.vin as Array<{ prevout?: { scriptpubkey_address?: string; value?: number } }> || [];
+
+          let received = 0;
+          let sent = 0;
+
+          for (const out of vout) {
+            if (out.scriptpubkey_address === address) {
+              received += out.value || 0;
+            }
+          }
+
+          for (const inp of vin) {
+            if (inp.prevout?.scriptpubkey_address === address) {
+              sent += inp.prevout.value || 0;
+            }
+          }
+
+          const netValue = (received - sent) / 100000000; // Convert satoshis to BTC
+          const fee = (tx.fee as number || 0) / 100000000;
+
+          return {
+            id: `bitcoin-${tx.txid}`,
+            hash: tx.txid as string,
+            chain: "bitcoin",
+            blockNumber: (tx.status as { block_height?: number })?.block_height || 0,
+            timestamp: (tx.status as { block_time?: number })?.block_time || Date.now() / 1000,
+            from: sent > 0 ? address : "",
+            to: received > 0 ? address : "",
+            value: Math.abs(netValue).toString(),
+            fee: fee.toString(),
+            type: "transfer" as TransactionType,
+            status: (tx.status as { confirmed?: boolean })?.confirmed ? "success" : "pending",
+            tokenSymbol: "BTC",
+            raw: tx,
+          };
+        });
+
+      } else if (baseUrl.includes("blockchair")) {
+        const url = `${baseUrl}/dashboards/address/${address}?limit=${pageSize}`;
+        const res = await fetchWithTimeout(url);
+
+        if (!res.ok) {
+          lastError = new Error(`HTTP ${res.status}`);
+          continue;
+        }
+
+        const data = await res.json();
+
         if (!data.data?.[address]) {
           return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
         }
+
         const addressData = data.data[address];
         const txHashes = addressData.transactions || [];
-        transactions = txHashes.map((hash: string) => ({
+
+        transactions = txHashes.slice(0, pageSize).map((hash: string) => ({
           id: `bitcoin-${hash}`,
           hash,
           chain: "bitcoin",
@@ -473,8 +582,19 @@ async function fetchBitcoinTransactions(
           status: "success" as const,
           tokenSymbol: "BTC",
         }));
+
       } else if (baseUrl.includes("blockchain.info")) {
+        const url = `${baseUrl}/rawaddr/${address}?limit=${pageSize}`;
+        const res = await fetchWithTimeout(url);
+
+        if (!res.ok) {
+          lastError = new Error(`HTTP ${res.status}`);
+          continue;
+        }
+
+        const data = await res.json();
         const txs = data.txs || [];
+
         transactions = txs.map((tx: Record<string, unknown>) => ({
           id: `bitcoin-${tx.hash}`,
           hash: tx.hash as string,
@@ -492,13 +612,15 @@ async function fetchBitcoinTransactions(
         }));
       }
 
-      return {
-        transactions,
-        totalCount: transactions.length,
-        page,
-        pageSize,
-        hasMore: transactions.length === pageSize,
-      };
+      if (transactions.length > 0 || page === 1) {
+        return {
+          transactions,
+          totalCount: transactions.length,
+          page,
+          pageSize,
+          hasMore: transactions.length === pageSize,
+        };
+      }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error("Unknown error");
       console.warn(`Bitcoin endpoint failed (${baseUrl}), trying next...`);
@@ -510,7 +632,7 @@ async function fetchBitcoinTransactions(
   throw lastError || new Error("Failed to fetch Bitcoin transactions");
 }
 
-// Substrate (Polkadot/Bittensor) Fetcher
+// Substrate (Polkadot/Bittensor) Fetcher - Subscan API
 async function fetchSubstrateTransactions(
   address: string,
   chainId: "polkadot" | "bittensor",
@@ -523,9 +645,19 @@ async function fetchSubstrateTransactions(
 
   for (const baseUrl of endpoints) {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      };
+
+      // Add API key if available for better rate limits
+      if (SUBSCAN_API_KEY) {
+        headers["X-API-Key"] = SUBSCAN_API_KEY;
+      }
+
       const res = await fetchWithTimeout(`${baseUrl}/api/v2/scan/transfers`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ address, row: pageSize, page: page - 1 }),
       });
 
@@ -591,7 +723,7 @@ async function fetchSubstrateTransactions(
   throw lastError || new Error(`Failed to fetch ${chainId} transactions`);
 }
 
-// Cosmos/Osmosis Fetcher with multiple endpoints
+// Cosmos/Osmosis Fetcher - Multiple LCD endpoints
 async function fetchCosmosTransactions(
   address: string,
   chainId: "cosmos" | "osmosis",
@@ -604,9 +736,12 @@ async function fetchCosmosTransactions(
 
   for (const baseUrl of endpoints) {
     try {
-      const url = `${baseUrl}/cosmos/tx/v1beta1/txs?events=message.sender='${address}'&pagination.limit=${pageSize}&order_by=ORDER_BY_DESC`;
+      // Use query parameter (events parameter is deprecated in some endpoints)
+      const url = `${baseUrl}/cosmos/tx/v1beta1/txs?query=message.sender='${address}'&pagination.limit=${pageSize}&order_by=ORDER_BY_DESC`;
 
-      const res = await fetchWithTimeout(url);
+      const res = await fetchWithTimeout(url, {
+        headers: { Accept: "application/json" },
+      });
 
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("text/html")) {
@@ -643,6 +778,7 @@ async function fetchCosmosTransactions(
           else if (msgType.includes("MsgUndelegate")) type = "undelegate";
           else if (msgType.includes("MsgWithdrawDelegatorReward")) type = "claim";
           else if (msgType.includes("MsgSwap")) type = "swap";
+          else if (msgType.includes("MsgTransfer")) type = "bridge"; // IBC transfer
         }
 
         const feeAmount = tx.tx?.auth_info?.fee?.amount?.[0]?.amount || "0";
@@ -684,7 +820,7 @@ async function fetchCosmosTransactions(
   throw lastError || new Error(`Failed to fetch from ${chainId}`);
 }
 
-// Ronin Fetcher
+// Ronin Fetcher - Official explorer API
 async function fetchRoninTransactions(
   address: string,
   page: number = 1,
@@ -703,13 +839,13 @@ async function fetchRoninTransactions(
 
       if (!res.ok) {
         console.warn("Ronin API returned error - may be blocked by Cloudflare");
-        return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+        continue;
       }
 
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("text/html")) {
         console.warn("Ronin API returned HTML - likely Cloudflare challenge");
-        return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+        continue;
       }
 
       const data = await res.json();
@@ -747,15 +883,16 @@ async function fetchRoninTransactions(
         hasMore: transactions.length === pageSize,
       };
     } catch (error) {
-      console.warn("Error fetching Ronin transactions (API may be blocked):", error);
-      return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+      console.warn("Error fetching Ronin transactions:", error);
+      continue;
     }
   }
 
+  // Return empty instead of throwing - Ronin API is often blocked
   return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
 }
 
-// Main fetch function
+// Main fetch function - routes to appropriate chain fetcher
 export async function fetchTransactions(
   address: string,
   chainId: string,
