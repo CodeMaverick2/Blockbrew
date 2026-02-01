@@ -187,21 +187,32 @@ export function useAddressMemory() {
     [state.bookmarkedAddresses]
   );
 
+  // Deduplicate recent addresses (in case of corrupted localStorage)
+  const deduplicatedRecent = useMemo(() => {
+    const seen = new Set<string>();
+    return state.recentAddresses.filter((a) => {
+      const key = `${a.address.toLowerCase()}-${a.chainId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [state.recentAddresses]);
+
   // Get all addresses (bookmarks first, then recent)
   const allAddresses = useMemo(() => {
     const bookmarkedSet = new Set(
       state.bookmarkedAddresses.map((a) => `${a.address.toLowerCase()}-${a.chainId}`)
     );
 
-    const nonBookmarkedRecent = state.recentAddresses.filter(
+    const nonBookmarkedRecent = deduplicatedRecent.filter(
       (a) => !bookmarkedSet.has(`${a.address.toLowerCase()}-${a.chainId}`)
     );
 
     return [...state.bookmarkedAddresses, ...nonBookmarkedRecent];
-  }, [state.bookmarkedAddresses, state.recentAddresses]);
+  }, [state.bookmarkedAddresses, deduplicatedRecent]);
 
   return {
-    recentAddresses: state.recentAddresses,
+    recentAddresses: deduplicatedRecent,
     bookmarkedAddresses: state.bookmarkedAddresses,
     allAddresses,
     addRecentAddress,

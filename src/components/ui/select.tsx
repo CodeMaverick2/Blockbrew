@@ -3,7 +3,7 @@
 import * as React from "react";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface SelectOption {
@@ -32,9 +32,32 @@ export function Select({
   disabled,
 }: SelectProps) {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
   const selectRef = React.useRef<HTMLDivElement>(null);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
+
+  // Filter options based on search
+  const filteredOptions = React.useMemo(() => {
+    if (!search.trim()) return options;
+    const searchLower = search.toLowerCase();
+    return options.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(searchLower) ||
+        opt.value.toLowerCase().includes(searchLower)
+    );
+  }, [options, search]);
+
+  // Focus search input when dropdown opens
+  React.useEffect(() => {
+    if (isOpen && searchInputRef.current) {
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+    if (!isOpen) {
+      setSearch("");
+    }
+  }, [isOpen]);
 
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -63,11 +86,11 @@ export function Select({
         disabled={disabled}
         className={cn(
           "flex h-12 w-full items-center justify-between rounded-xl px-4 py-3 text-sm transition-all duration-200",
-          "bg-[#141414] border border-white/[0.08]",
-          "hover:border-white/[0.12] hover:bg-[#181818]",
-          "focus:outline-none focus:border-white/20",
+          "bg-white/[0.04] border border-white/[0.1]",
+          "hover:border-white/[0.15] hover:bg-white/[0.06]",
+          "focus:outline-none focus:border-white/25",
           "disabled:cursor-not-allowed disabled:opacity-50",
-          isOpen && "border-white/20 bg-[#181818]"
+          isOpen && "border-white/25 bg-white/[0.06]"
         )}
       >
         <div className="flex items-center gap-3">
@@ -109,8 +132,27 @@ export function Select({
             transition={{ duration: 0.15, ease: "easeOut" }}
             className="absolute z-50 mt-2 w-full rounded-xl bg-[#141414] border border-white/[0.08] shadow-2xl shadow-black/50 overflow-hidden"
           >
-            <div className="max-h-[320px] overflow-auto scrollbar-thin p-1.5">
-              {options.map((option, index) => (
+            {/* Search Input */}
+            <div className="p-2 border-b border-white/[0.06]">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search chains..."
+                  className="w-full h-9 pl-9 pr-3 rounded-lg bg-white/[0.03] border border-white/[0.06] text-sm placeholder:text-muted-foreground focus:outline-none focus:border-white/[0.12]"
+                />
+              </div>
+            </div>
+            <div className="max-h-[280px] overflow-auto scrollbar-thin p-1.5">
+              {filteredOptions.length === 0 ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  No chains found
+                </div>
+              ) : (
+              filteredOptions.map((option, index) => (
                 <motion.button
                   key={option.value}
                   type="button"
@@ -150,7 +192,8 @@ export function Select({
                     <Check className="h-4 w-4 text-emerald-400" />
                   )}
                 </motion.button>
-              ))}
+              ))
+              )}
             </div>
           </motion.div>
         )}

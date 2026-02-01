@@ -63,8 +63,19 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-12 pt-6 border-t border-border/50 flex flex-col sm:flex-row justify-between gap-4 text-xs text-muted-foreground/50">
+        <div className="mt-12 pt-6 border-t border-border/50 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-muted-foreground/50">
           <p>© {new Date().getFullYear()} BlockBrew. Open source.</p>
+          <p className="flex items-center gap-1">
+            Built by{" "}
+            <a
+              href="https://x.com/TejasGhatule"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              @TejasGhatule
+            </a>
+          </p>
           <p>Not financial advice.</p>
         </div>
       </div>

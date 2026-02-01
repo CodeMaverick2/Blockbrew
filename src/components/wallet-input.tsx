@@ -63,18 +63,17 @@ export function WalletInput({
     <form onSubmit={handleSubmit} className={cn("w-full", className)}>
       <div className="flex gap-2">
         <div className="flex-1">
-          {/* Input wrapper with fixed height for button positioning */}
           <div className="relative">
             <input
               type="text"
               value={value}
               onChange={handleChange}
-              placeholder="0x..."
+              placeholder="Enter wallet address..."
               disabled={isLoading}
               className={cn(
-                "flex h-11 w-full rounded-lg bg-white/[0.03] border border-white/[0.08] px-4 py-2 text-sm transition-all duration-200",
+                "flex h-12 w-full rounded-xl bg-white/[0.04] border border-white/[0.1] px-4 py-2 text-sm transition-all duration-200",
                 "placeholder:text-muted-foreground/50",
-                "focus:outline-none focus:border-white/20 focus:bg-white/[0.05]",
+                "focus:outline-none focus:border-white/20 focus:bg-white/[0.06]",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 "font-mono pr-10",
                 error && "border-red-500/50 focus:border-red-500/70"
@@ -84,13 +83,12 @@ export function WalletInput({
               <button
                 type="button"
                 onClick={handleClear}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white transition-colors p-1 rounded-md hover:bg-white/[0.08]"
               >
                 <X className="h-4 w-4" />
               </button>
             )}
           </div>
-          {/* Error message outside the relative container */}
           {error && (
             <p className="mt-1.5 text-xs text-red-400">{error}</p>
           )}
@@ -101,7 +99,7 @@ export function WalletInput({
           isLoading={isLoading}
           disabled={(!skipChainValidation && !chainId) || !value.trim()}
           leftIcon={!isLoading && <Search className="h-4 w-4" />}
-          className="h-11"
+          className="h-12 px-5 bg-white text-black hover:bg-white/90 border-0"
         >
           {isLoading ? "Scanning" : "Search"}
         </Button>

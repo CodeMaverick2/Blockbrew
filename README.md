@@ -1,5 +1,7 @@
 # BlockBrew
 
+[![CI](https://github.com/CodeMaverick2/BlockBrew/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeMaverick2/BlockBrew/actions/workflows/ci.yml)
+
 A multi-chain blockchain transaction explorer with tax-ready CSV export. View, analyze, and export transaction history from any wallet address across 14 blockchains.
 
 ## Features
@@ -230,9 +232,34 @@ Contributions are welcome. Please follow these steps:
 - Test on multiple screen sizes
 - Ensure no TypeScript errors (`npm run build`)
 
+### Testing
+
+Run chain API integration tests to verify all blockchain connections:
+
+```bash
+# Run all chain tests
+npm run test:chains
+
+# Run tests in watch mode during development
+npm run test:watch
+
+# Run all tests
+npm run test
+```
+
+The test suite verifies:
+- Address validation for each chain format
+- Transaction fetching from all 14 supported chains
+- Error handling for invalid addresses
+- Graceful handling of rate limits and API failures
+
 ## License
 
 MIT License - see LICENSE file for details.
+
+## Author
+
+Built by [@TejasGhatule](https://x.com/TejasGhatule)
 
 ## Acknowledgments
 

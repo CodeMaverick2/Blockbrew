@@ -26,12 +26,15 @@ import { Transaction } from "@/types";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowRight,
-  Zap,
-  Shield,
-  Download,
   BarChart3,
   List,
+  Search,
+  FileSpreadsheet,
+  Layers,
+  Wallet,
+  TrendingUp,
+  Calculator,
+  Eye,
 } from "lucide-react";
 
 // Subtle animated background
@@ -93,16 +96,54 @@ function LiveIndicator() {
   );
 }
 
-// Feature card
-function FeatureCard({
+// How it works step
+function HowItWorksStep({
+  number,
   icon: Icon,
   title,
   description,
   index,
 }: {
+  number: number;
   icon: React.ElementType;
   title: string;
   description: string;
+  index: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.4, delay: index * 0.15 }}
+      className="relative flex flex-col items-center text-center"
+    >
+      <div className="relative mb-4">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/[0.08] flex items-center justify-center">
+          <Icon className="w-7 h-7 text-white/80" />
+        </div>
+        <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-black text-xs font-bold flex items-center justify-center">
+          {number}
+        </span>
+      </div>
+      <h3 className="font-medium mb-2">{title}</h3>
+      <p className="text-sm text-muted-foreground max-w-[200px]">{description}</p>
+    </motion.div>
+  );
+}
+
+// Use case card
+function UseCaseCard({
+  icon: Icon,
+  title,
+  description,
+  tags,
+  index,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  tags: string[];
   index: number;
 }) {
   return (
@@ -111,16 +152,48 @@ function FeatureCard({
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.4, delay: index * 0.1 }}
-      className="p-5 rounded-xl bg-[#141414] border border-white/[0.06] hover:border-white/[0.1] transition-all duration-200"
+      className="p-6 rounded-xl bg-[#111111] border border-white/[0.06] hover:border-white/[0.1] transition-all duration-200"
     >
-      <div className="w-10 h-10 rounded-lg bg-white/[0.05] flex items-center justify-center mb-3">
-        <Icon className="w-5 h-5 text-white/70" />
+      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] flex items-center justify-center mb-4">
+        <Icon className="w-6 h-6 text-white/80" />
       </div>
-      <h3 className="font-medium mb-1">{title}</h3>
-      <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+      <h3 className="font-semibold mb-2">{title}</h3>
+      <p className="text-sm text-muted-foreground leading-relaxed mb-4">{description}</p>
+      <div className="flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="px-2 py-1 rounded-md bg-white/[0.04] text-xs text-muted-foreground"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
     </motion.div>
   );
 }
+
+// Example addresses for demo
+const EXAMPLE_ADDRESSES = [
+  {
+    name: "Vitalik.eth",
+    address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    chainId: "ethereum",
+    description: "Ethereum co-founder",
+  },
+  {
+    name: "Justin Sun",
+    address: "0x3DdfA8eC3052539b6C9549F12cEA2C295cfF5296",
+    chainId: "ethereum",
+    description: "Tron founder",
+  },
+  {
+    name: "Binance Hot Wallet",
+    address: "0x28C6c06298d514Db089934071355E5743bf21d60",
+    chainId: "ethereum",
+    description: "Major exchange",
+  },
+];
 
 // Tab bar for switching between Transactions and Analytics
 function ViewTabs({
@@ -226,7 +299,15 @@ export default function HomePage() {
     return filterHook.applyFilters(rawTransactions);
   }, [rawTransactions, filterHook]);
 
+  // Ref for auto-scrolling to results
+  const resultsRef = React.useRef<HTMLDivElement>(null);
+
   const handleSearch = () => {
+    if (!address.trim()) {
+      // Reset to initial state if address is empty
+      setSearchTrigger(0);
+      return;
+    }
     setSearchTrigger((prev) => prev + 1);
     setActiveView("transactions");
 
@@ -235,6 +316,13 @@ export default function HomePage() {
       addressMemory.addRecentAddress(address, chainId);
     }
   };
+
+  // Reset search state when address is cleared
+  React.useEffect(() => {
+    if (!address.trim() && searchTrigger > 0) {
+      setSearchTrigger(0);
+    }
+  }, [address, searchTrigger]);
 
   const handleSelectSavedAddress = (savedAddress: string, savedChainId: string) => {
     setAddress(savedAddress);
@@ -274,6 +362,13 @@ export default function HomePage() {
     ? multiChainSearch.isLoading || multiChainSearch.isFetching
     : isLoading || isFetching;
   const hasResults = transactions.length > 0;
+
+  // Auto-scroll to results when data loads
+  React.useEffect(() => {
+    if (hasResults && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hasResults]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0a0a0a] relative overflow-hidden">
@@ -333,13 +428,16 @@ export default function HomePage() {
                 className="text-center mb-10"
               >
                 <h1 className="text-4xl md:text-6xl font-semibold tracking-tight mb-4">
-                  <span className="text-gradient">Track</span> your
+                  Your entire{" "}
+                  <span className="text-gradient">crypto history</span>
                   <br />
-                  transactions
+                  in one place
                 </h1>
-                <p className="text-lg text-muted-foreground max-w-md mx-auto">
-                  Multi-chain explorer with instant CSV export.
-                  <span className="text-white/80"> Tax-ready.</span>
+                <p className="text-lg text-muted-foreground max-w-lg mx-auto">
+                  View transactions from any wallet across{" "}
+                  <span className="text-white/80">{SUPPORTED_CHAINS.length} blockchains</span>.
+                  Export to CSV for{" "}
+                  <span className="text-white/80">tax reporting</span> in seconds.
                 </p>
               </motion.div>
 
@@ -350,7 +448,13 @@ export default function HomePage() {
                 transition={{ duration: 0.5, delay: 0.2 }}
                 className="max-w-xl mx-auto mb-10"
               >
-                <div className="p-5 rounded-2xl bg-[#111111] border border-white/[0.06]">
+                {/* Clean elevated container */}
+                <div className="relative">
+                  {/* Subtle outer glow */}
+                  <div className="absolute -inset-1 bg-white/[0.02] rounded-3xl blur-xl" />
+
+                  {/* Main container */}
+                  <div className="relative p-6 rounded-2xl bg-[#0a0a0a] border border-white/[0.1] shadow-2xl shadow-black/50">
                   {/* Top row with saved addresses button */}
                   <div className="flex items-center justify-between mb-3">
                     <AddressSidebarTrigger
@@ -386,6 +490,41 @@ export default function HomePage() {
                     />
                   </div>
 
+                  {/* Try Example - Clean CTA */}
+                  {!address && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: 0.3 }}
+                      className="mt-5 pt-5 border-t border-white/[0.06]"
+                    >
+                      <p className="text-xs text-muted-foreground mb-2.5">
+                        No wallet? Try an example:
+                      </p>
+                      <button
+                        onClick={() => {
+                          setAddress(EXAMPLE_ADDRESSES[0].address);
+                          setChainId(EXAMPLE_ADDRESSES[0].chainId);
+                          setTimeout(() => setSearchTrigger((prev) => prev + 1), 100);
+                        }}
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] hover:bg-white/[0.06] hover:border-white/[0.15] transition-all duration-200 group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-white/[0.08] flex items-center justify-center">
+                            <span className="text-sm font-medium text-white/80">V</span>
+                          </div>
+                          <div className="text-left">
+                            <p className="text-sm font-medium text-white/90">vitalik.eth</p>
+                            <p className="text-xs text-muted-foreground">Ethereum co-founder</p>
+                          </div>
+                        </div>
+                        <span className="text-xs px-3 py-1.5 rounded-lg bg-white/[0.06] text-white/60 group-hover:bg-white/[0.1] group-hover:text-white/90 transition-all duration-200">
+                          Try it
+                        </span>
+                      </button>
+                    </motion.div>
+                  )}
+
                   {/* Selected chain */}
                   <AnimatePresence>
                     {selectedChain && !multiChainSearch.isMultiChainMode && (
@@ -412,16 +551,16 @@ export default function HomePage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                  </div>
                 </div>
               </motion.div>
 
-              {/* Removed duplicate chain grid - using Supported Networks section below */}
             </div>
           </div>
         </section>
 
         {/* Results */}
-        <section className="container mx-auto px-4 py-10">
+        <section ref={resultsRef} className="container mx-auto px-4 py-10">
           <AnimatePresence mode="wait">
             {isSearching && searchTrigger > 0 ? (
               <motion.div
@@ -651,52 +790,114 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* Features */}
+        {/* How it Works */}
         {!hasResults && (
-          <section className="border-t border-white/[0.06]">
-            <div className="container mx-auto px-4 py-14">
-              <div className="grid md:grid-cols-3 gap-4 max-w-3xl mx-auto">
-                <FeatureCard
-                  icon={Zap}
-                  title="Real-time data"
-                  description="Live transaction data from blockchain explorers"
+          <section className="border-t border-white/[0.06] py-16">
+            <div className="container mx-auto px-4">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5 }}
+                className="text-center mb-12"
+              >
+                <span className="inline-block px-3 py-1 mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground bg-white/[0.03] rounded-full border border-white/[0.06]">
+                  How It Works
+                </span>
+                <h2 className="text-2xl md:text-3xl font-semibold mb-3">
+                  Three steps to your transaction history
+                </h2>
+                <p className="text-muted-foreground max-w-md mx-auto">
+                  No signup required. Just paste an address and go.
+                </p>
+              </motion.div>
+
+              <div className="grid md:grid-cols-3 gap-8 max-w-3xl mx-auto relative">
+                {/* Connector line */}
+                <div className="hidden md:block absolute top-8 left-1/4 right-1/4 h-px bg-gradient-to-r from-transparent via-white/[0.1] to-transparent" />
+
+                <HowItWorksStep
+                  number={1}
+                  icon={Wallet}
+                  title="Paste any address"
+                  description="Enter a wallet address from any supported blockchain"
                   index={0}
                 />
-                <FeatureCard
-                  icon={Download}
-                  title="Multi-format export"
-                  description="Export to Awaken, Koinly, CoinTracker, TaxBit"
+                <HowItWorksStep
+                  number={2}
+                  icon={Search}
+                  title="View transactions"
+                  description="See all incoming, outgoing, and contract interactions"
                   index={1}
                 />
-                <FeatureCard
-                  icon={Shield}
-                  title="Privacy first"
-                  description="No data stored. Runs in your browser"
+                <HowItWorksStep
+                  number={3}
+                  icon={FileSpreadsheet}
+                  title="Export to CSV"
+                  description="Download tax-ready reports for your crypto software"
                   index={2}
                 />
               </div>
-
-              {/* CTA */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                whileInView={{ opacity: 1 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.3 }}
-                className="text-center mt-10"
-              >
-                <a
-                  href="https://awaken.tax"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors"
-                >
-                  Get started with Awaken
-                  <ArrowRight className="w-4 h-4" />
-                </a>
-              </motion.div>
             </div>
           </section>
         )}
+
+        {/* Use Cases */}
+        {!hasResults && (
+          <section className="border-t border-white/[0.06] py-16 bg-[#080808]">
+            <div className="container mx-auto px-4">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5 }}
+                className="text-center mb-12"
+              >
+                <span className="inline-block px-3 py-1 mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground bg-white/[0.03] rounded-full border border-white/[0.06]">
+                  Use Cases
+                </span>
+                <h2 className="text-2xl md:text-3xl font-semibold mb-3">
+                  Built for crypto natives
+                </h2>
+                <p className="text-muted-foreground max-w-md mx-auto">
+                  Whether you're filing taxes or tracking a whale, we've got you covered.
+                </p>
+              </motion.div>
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto">
+                <UseCaseCard
+                  icon={Calculator}
+                  title="Tax Reporting"
+                  description="Generate tax-ready CSV files compatible with all major crypto tax software"
+                  tags={["Koinly", "CoinTracker", "TaxBit"]}
+                  index={0}
+                />
+                <UseCaseCard
+                  icon={TrendingUp}
+                  title="Portfolio Tracking"
+                  description="View token balances and transaction history across all your wallets"
+                  tags={["Multi-wallet", "Real-time"]}
+                  index={1}
+                />
+                <UseCaseCard
+                  icon={Eye}
+                  title="Whale Watching"
+                  description="Monitor high-value addresses and track large movements"
+                  tags={["Public data", "No alerts"]}
+                  index={2}
+                />
+                <UseCaseCard
+                  icon={Layers}
+                  title="Multi-chain Analysis"
+                  description="Search the same address across all EVM chains simultaneously"
+                  tags={["7 EVM chains", "Parallel"]}
+                  index={3}
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
       </main>
 
       <Footer />

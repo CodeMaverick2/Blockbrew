@@ -25,473 +25,666 @@ function getTransactionType(method?: string, value?: string): TransactionType {
   return "contract";
 }
 
-// Blockscout API URLs (free, no API key needed)
-const BLOCKSCOUT_URLS: Record<string, string> = {
-  ethereum: "https://eth.blockscout.com",
-  polygon: "https://polygon.blockscout.com",
-  arbitrum: "https://arbitrum.blockscout.com",
-  optimism: "https://optimism.blockscout.com",
-  base: "https://base.blockscout.com",
+// Multiple API endpoints per chain for fallback
+const CHAIN_ENDPOINTS: Record<string, string[]> = {
+  // EVM Chains - Blockscout + alternatives
+  ethereum: [
+    "https://eth.blockscout.com",
+    "https://api.etherscan.io/api",
+  ],
+  polygon: [
+    "https://polygon.blockscout.com",
+    "https://api.polygonscan.com/api",
+  ],
+  arbitrum: [
+    "https://arbitrum.blockscout.com",
+    "https://api.arbiscan.io/api",
+  ],
+  optimism: [
+    "https://optimism.blockscout.com",
+    "https://api-optimistic.etherscan.io/api",
+  ],
+  base: [
+    "https://base.blockscout.com",
+    "https://api.basescan.org/api",
+  ],
+  bsc: [
+    "https://api.bscscan.com/api",
+    "https://bsc.blockscout.com",
+  ],
+  avalanche: [
+    "https://api.snowtrace.io/api",
+    "https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api",
+  ],
+  // Solana - official RPC first (most reliable)
+  solana: [
+    "https://api.mainnet-beta.solana.com",
+  ],
+  // Bitcoin
+  bitcoin: [
+    "https://api.blockchair.com/bitcoin",
+    "https://blockchain.info",
+  ],
+  // Substrate chains
+  polkadot: [
+    "https://polkadot.api.subscan.io",
+  ],
+  bittensor: [
+    "https://bittensor.api.subscan.io",
+  ],
+  // Cosmos ecosystem
+  cosmos: [
+    "https://cosmos-rest.publicnode.com",
+    "https://rest.cosmos.directory/cosmoshub",
+    "https://lcd-cosmoshub.keplr.app",
+  ],
+  osmosis: [
+    "https://osmosis-rest.publicnode.com",
+    "https://rest.cosmos.directory/osmosis",
+    "https://lcd-osmosis.keplr.app",
+  ],
+  // Ronin
+  ronin: [
+    "https://explorer.roninchain.com",
+  ],
 };
 
-// Etherscan-style API URLs (for chains without Blockscout)
-const ETHERSCAN_STYLE_URLS: Record<string, string> = {
-  bsc: "https://api.bscscan.com/api",
-  avalanche: "https://api.snowtrace.io/api",
-};
+// Generic fetch with timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-// Fetch via Blockscout (EVM chains)
-async function fetchBlockscoutTransactions(
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Parse Blockscout API response
+function parseBlockscoutResponse(
+  data: { items?: unknown[] },
+  address: string,
+  chainId: string,
+  chain: { decimals: number; symbol: string }
+): Transaction[] {
+  const items = data.items || [];
+  const transactions: Transaction[] = [];
+
+  for (const tx of items as Record<string, unknown>[]) {
+    const valueWei = BigInt((tx.value as string) || "0");
+    const valueInEth = Number(valueWei) / Math.pow(10, chain.decimals);
+
+    let feeInEth = 0;
+    const fee = tx.fee as { value?: string } | undefined;
+    if (fee?.value) {
+      const feeWei = BigInt(fee.value);
+      feeInEth = Number(feeWei) / Math.pow(10, chain.decimals);
+    }
+
+    const timestamp = tx.timestamp
+      ? new Date(tx.timestamp as string).getTime() / 1000
+      : Date.now() / 1000;
+
+    const fromObj = tx.from as { hash?: string } | undefined;
+    const toObj = tx.to as { hash?: string } | undefined;
+
+    transactions.push({
+      id: `${chainId}-${tx.hash}`,
+      hash: tx.hash as string,
+      chain: chainId,
+      blockNumber: (tx.block_number as number) || 0,
+      timestamp,
+      from: fromObj?.hash?.toLowerCase() || "",
+      to: toObj?.hash?.toLowerCase() || "",
+      value: valueInEth.toString(),
+      fee: feeInEth.toString(),
+      type: getTransactionType(tx.method as string, tx.value as string),
+      status: tx.status === "ok" || tx.result === "success" ? "success" : "failed",
+      method: (tx.method as string) || undefined,
+      tokenSymbol: chain.symbol,
+      gasUsed: tx.gas_used?.toString(),
+      nonce: tx.nonce as number,
+      raw: tx,
+    });
+  }
+
+  return transactions;
+}
+
+// Parse Etherscan-style API response
+function parseEtherscanResponse(
+  data: { result?: unknown[] },
+  chainId: string,
+  chain: { decimals: number; symbol: string }
+): Transaction[] {
+  const items = data.result || [];
+  const transactions: Transaction[] = [];
+
+  for (const tx of items as Record<string, string>[]) {
+    const valueWei = BigInt(tx.value || "0");
+    const valueInEth = Number(valueWei) / Math.pow(10, chain.decimals);
+
+    const gasPrice = BigInt(tx.gasPrice || "0");
+    const gasUsed = BigInt(tx.gasUsed || "0");
+    const feeWei = gasPrice * gasUsed;
+    const feeInEth = Number(feeWei) / Math.pow(10, chain.decimals);
+
+    transactions.push({
+      id: `${chainId}-${tx.hash}`,
+      hash: tx.hash,
+      chain: chainId,
+      blockNumber: parseInt(tx.blockNumber) || 0,
+      timestamp: parseInt(tx.timeStamp) || Date.now() / 1000,
+      from: tx.from?.toLowerCase() || "",
+      to: tx.to?.toLowerCase() || "",
+      value: valueInEth.toString(),
+      fee: feeInEth.toString(),
+      type: getTransactionType(tx.functionName, tx.value),
+      status: tx.isError === "0" ? "success" : "failed",
+      method: tx.functionName?.split("(")[0] || undefined,
+      tokenSymbol: chain.symbol,
+      gasUsed: tx.gasUsed,
+      nonce: parseInt(tx.nonce),
+      raw: tx,
+    });
+  }
+
+  return transactions;
+}
+
+// Fetch EVM transactions with fallback
+async function fetchEVMTransactions(
   address: string,
   chainId: string,
   page: number = 1,
   pageSize: number = 50
 ): Promise<TransactionResponse> {
-  const baseUrl = BLOCKSCOUT_URLS[chainId];
-  if (!baseUrl) {
-    throw new Error(`Chain ${chainId} not supported via Blockscout`);
-  }
-
+  const endpoints = CHAIN_ENDPOINTS[chainId] || [];
   const chain = CHAIN_MAP[chainId];
 
-  try {
-    const res = await fetch(
-      `${baseUrl}/api/v2/addresses/${address}/transactions`,
-      {
-        headers: { Accept: "application/json" },
-      }
-    );
+  if (!chain) {
+    throw new Error(`Chain ${chainId} not configured`);
+  }
 
-    if (!res.ok) {
-      if (res.status === 404) {
-        throw new Error(`Address not found on ${chain.name}`);
-      } else if (res.status === 422 || res.status === 400) {
-        throw new Error(`Invalid address format for ${chain.name}`);
-      } else if (res.status === 429) {
-        throw new Error("Rate limited. Please try again in a moment");
-      }
-      throw new Error(`Failed to fetch from ${chain.name} (${res.status})`);
-    }
+  let lastError: Error | null = null;
 
-    const data = await res.json();
-    const items = data.items || [];
-    const transactions: Transaction[] = [];
-
-    for (const tx of items) {
-      const valueWei = BigInt(tx.value || "0");
-      const valueInEth = Number(valueWei) / Math.pow(10, chain.decimals);
-
-      let feeInEth = 0;
-      if (tx.fee?.value) {
-        const feeWei = BigInt(tx.fee.value);
-        feeInEth = Number(feeWei) / Math.pow(10, chain.decimals);
-      }
-
-      const timestamp = tx.timestamp
-        ? new Date(tx.timestamp).getTime() / 1000
-        : Date.now() / 1000;
-
-      transactions.push({
-        id: `${chainId}-${tx.hash}`,
-        hash: tx.hash,
-        chain: chainId,
-        blockNumber: tx.block_number || 0,
-        timestamp,
-        from: tx.from?.hash?.toLowerCase() || "",
-        to: tx.to?.hash?.toLowerCase() || "",
-        value: valueInEth.toString(),
-        fee: feeInEth.toString(),
-        type: getTransactionType(tx.method, tx.value),
-        status: tx.status === "ok" || tx.result === "success" ? "success" : "failed",
-        method: tx.method || undefined,
-        tokenSymbol: chain.symbol,
-        gasUsed: tx.gas_used?.toString(),
-        nonce: tx.nonce,
-        raw: tx,
-      });
-    }
-
-    // Also fetch token transfers
+  for (const endpoint of endpoints) {
     try {
-      const tokenRes = await fetch(
-        `${baseUrl}/api/v2/addresses/${address}/token-transfers`,
-        { headers: { Accept: "application/json" } }
-      );
+      // Determine API type based on URL
+      const isBlockscout = endpoint.includes("blockscout");
+      const isEtherscan = endpoint.includes("scan") || endpoint.includes("etherscan") || endpoint.includes("snowtrace") || endpoint.includes("routescan");
 
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        const tokenItems = tokenData.items || [];
+      let url: string;
+      if (isBlockscout) {
+        url = `${endpoint}/api/v2/addresses/${address}/transactions`;
+      } else if (isEtherscan) {
+        url = `${endpoint}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc`;
+      } else {
+        continue;
+      }
 
-        for (const transfer of tokenItems) {
-          const decimals = parseInt(transfer.token?.decimals || "18");
-          const valueRaw = BigInt(transfer.total?.value || "0");
-          const value = Number(valueRaw) / Math.pow(10, decimals);
+      const res = await fetchWithTimeout(url, {
+        headers: { Accept: "application/json" },
+      });
 
-          const timestamp = transfer.timestamp
-            ? new Date(transfer.timestamp).getTime() / 1000
-            : Date.now() / 1000;
+      // Check for HTML response (error page)
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        lastError = new Error("API returned HTML instead of JSON");
+        continue;
+      }
 
-          const existingTx = transactions.find(t => t.hash === transfer.tx_hash);
-          if (!existingTx) {
-            transactions.push({
-              id: `${chainId}-${transfer.tx_hash}-token`,
-              hash: transfer.tx_hash,
-              chain: chainId,
-              blockNumber: transfer.block_number || 0,
-              timestamp,
-              from: transfer.from?.hash?.toLowerCase() || "",
-              to: transfer.to?.hash?.toLowerCase() || "",
-              value: value.toString(),
-              fee: "0",
-              type: "transfer",
-              status: "success",
-              tokenSymbol: transfer.token?.symbol || "TOKEN",
-              tokenName: transfer.token?.name,
-              tokenDecimals: decimals,
-              tokenAddress: transfer.token?.address,
-              raw: transfer,
-            });
+      if (!res.ok) {
+        if (res.status === 429) {
+          lastError = new Error("Rate limited");
+          continue;
+        }
+        lastError = new Error(`HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+
+      let transactions: Transaction[];
+
+      if (isBlockscout) {
+        transactions = parseBlockscoutResponse(data, address, chainId, chain);
+      } else {
+        // Etherscan-style response
+        if (data.status !== "1" && data.message !== "No transactions found") {
+          if (data.message === "NOTOK" || data.result?.includes?.("rate")) {
+            lastError = new Error("Rate limited or API key required");
+            continue;
           }
+          if (data.result?.length === 0 || data.message === "No transactions found") {
+            return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+          }
+          lastError = new Error(data.message || "API error");
+          continue;
+        }
+        transactions = parseEtherscanResponse(data, chainId, chain);
+      }
+
+      // Also try to fetch token transfers for Blockscout
+      if (isBlockscout) {
+        try {
+          const tokenRes = await fetchWithTimeout(
+            `${endpoint}/api/v2/addresses/${address}/token-transfers`,
+            { headers: { Accept: "application/json" } }
+          );
+
+          if (tokenRes.ok) {
+            const tokenData = await tokenRes.json();
+            const tokenItems = tokenData.items || [];
+
+            for (const transfer of tokenItems as Record<string, unknown>[]) {
+              const token = transfer.token as { decimals?: string; symbol?: string; name?: string; address?: string } | undefined;
+              const total = transfer.total as { value?: string } | undefined;
+              const decimals = parseInt(token?.decimals || "18");
+              const valueRaw = BigInt(total?.value || "0");
+              const value = Number(valueRaw) / Math.pow(10, decimals);
+
+              const timestamp = transfer.timestamp
+                ? new Date(transfer.timestamp as string).getTime() / 1000
+                : Date.now() / 1000;
+
+              const existingTx = transactions.find(t => t.hash === transfer.tx_hash);
+              if (!existingTx) {
+                const fromObj = transfer.from as { hash?: string } | undefined;
+                const toObj = transfer.to as { hash?: string } | undefined;
+
+                transactions.push({
+                  id: `${chainId}-${transfer.tx_hash}-token`,
+                  hash: transfer.tx_hash as string,
+                  chain: chainId,
+                  blockNumber: (transfer.block_number as number) || 0,
+                  timestamp,
+                  from: fromObj?.hash?.toLowerCase() || "",
+                  to: toObj?.hash?.toLowerCase() || "",
+                  value: value.toString(),
+                  fee: "0",
+                  type: "transfer",
+                  status: "success",
+                  tokenSymbol: token?.symbol || "TOKEN",
+                  tokenName: token?.name,
+                  tokenDecimals: decimals,
+                  tokenAddress: token?.address,
+                  raw: transfer,
+                });
+              }
+            }
+          }
+        } catch {
+          // Token transfers are optional
         }
       }
-    } catch {
-      // Token transfers are optional
-    }
 
-    // Sort by timestamp descending
-    transactions.sort((a, b) => {
-      const tsA = typeof a.timestamp === "string" ? parseInt(a.timestamp) : a.timestamp;
-      const tsB = typeof b.timestamp === "string" ? parseInt(b.timestamp) : b.timestamp;
-      return tsB - tsA;
-    });
-
-    return {
-      transactions: transactions.slice(0, pageSize),
-      totalCount: transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length > pageSize,
-    };
-  } catch (error) {
-    console.error(`Error fetching ${chainId} transactions:`, error);
-    throw error;
-  }
-}
-
-// Fetch via Etherscan-style API (BSC, etc.)
-async function fetchEtherscanStyleTransactions(
-  address: string,
-  chainId: string,
-  page: number = 1,
-  pageSize: number = 50
-): Promise<TransactionResponse> {
-  const baseUrl = ETHERSCAN_STYLE_URLS[chainId];
-  if (!baseUrl) {
-    throw new Error(`Chain ${chainId} not supported via Etherscan-style API`);
-  }
-
-  const chain = CHAIN_MAP[chainId];
-
-  try {
-    // Fetch normal transactions
-    const res = await fetch(
-      `${baseUrl}?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=${page}&offset=${pageSize}&sort=desc`
-    );
-
-    if (!res.ok) {
-      if (res.status === 429) {
-        throw new Error("Rate limited. Please try again in a moment");
-      }
-      throw new Error(`Failed to fetch from ${chain.name} (${res.status})`);
-    }
-
-    const data = await res.json();
-    if (data.status !== "1" && data.message !== "No transactions found") {
-      if (data.message?.includes("Invalid address")) {
-        throw new Error(`Invalid address format for ${chain.name}`);
-      }
-      throw new Error(data.message || `Failed to fetch from ${chain.name}`);
-    }
-
-    const items = data.result || [];
-    const transactions: Transaction[] = [];
-
-    for (const tx of items) {
-      const valueWei = BigInt(tx.value || "0");
-      const valueInEth = Number(valueWei) / Math.pow(10, chain.decimals);
-
-      const gasPrice = BigInt(tx.gasPrice || "0");
-      const gasUsed = BigInt(tx.gasUsed || "0");
-      const feeWei = gasPrice * gasUsed;
-      const feeInEth = Number(feeWei) / Math.pow(10, chain.decimals);
-
-      transactions.push({
-        id: `${chainId}-${tx.hash}`,
-        hash: tx.hash,
-        chain: chainId,
-        blockNumber: parseInt(tx.blockNumber) || 0,
-        timestamp: parseInt(tx.timeStamp) || Date.now() / 1000,
-        from: tx.from?.toLowerCase() || "",
-        to: tx.to?.toLowerCase() || "",
-        value: valueInEth.toString(),
-        fee: feeInEth.toString(),
-        type: getTransactionType(tx.functionName, tx.value),
-        status: tx.isError === "0" ? "success" : "failed",
-        method: tx.functionName?.split("(")[0] || undefined,
-        tokenSymbol: chain.symbol,
-        gasUsed: tx.gasUsed,
-        nonce: parseInt(tx.nonce),
-        raw: tx,
+      // Sort by timestamp descending
+      transactions.sort((a, b) => {
+        const tsA = typeof a.timestamp === "string" ? parseInt(a.timestamp) : a.timestamp;
+        const tsB = typeof b.timestamp === "string" ? parseInt(b.timestamp) : b.timestamp;
+        return tsB - tsA;
       });
-    }
 
-    return {
-      transactions,
-      totalCount: transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    console.error(`Error fetching ${chainId} transactions:`, error);
-    throw error;
+      return {
+        transactions: transactions.slice(0, pageSize),
+        totalCount: transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length > pageSize,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown error");
+      console.warn(`${chainId} endpoint failed (${endpoint}), trying next...`);
+      continue;
+    }
   }
+
+  // All endpoints failed
+  console.error(`All ${chainId} endpoints failed:`, lastError);
+  throw lastError || new Error(`Failed to fetch from ${chain.name}`);
 }
 
-// Solana Fetcher
+// Solana Fetcher with multiple endpoints
 async function fetchSolanaTransactions(
   address: string,
   page: number = 1,
   pageSize: number = 50
 ): Promise<TransactionResponse> {
-  try {
-    const res = await fetch("https://api.mainnet-beta.solana.com", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getSignaturesForAddress",
-        params: [address, { limit: pageSize }],
-      }),
-    });
+  const endpoints = CHAIN_ENDPOINTS.solana;
+  let lastError: Error | null = null;
 
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+  for (const rpcUrl of endpoints) {
+    try {
+      const res = await fetchWithTimeout(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getSignaturesForAddress",
+          params: [address, { limit: pageSize }],
+        }),
+      });
 
-    const signatures = data.result || [];
-    const transactions: Transaction[] = signatures.map((sig: Record<string, unknown>) => ({
-      id: `solana-${sig.signature}`,
-      hash: sig.signature as string,
-      chain: "solana",
-      blockNumber: sig.slot as number,
-      timestamp: (sig.blockTime as number) || Date.now() / 1000,
-      from: address,
-      to: "",
-      value: "0",
-      fee: "0",
-      type: sig.err ? "unknown" : "transfer",
-      status: sig.err ? "failed" : "success",
-      tokenSymbol: "SOL",
-      raw: sig,
-    }));
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}`);
+        continue;
+      }
 
-    return {
-      transactions,
-      totalCount: transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    console.error("Error fetching Solana transactions:", error);
-    throw error;
+      const data = await res.json();
+
+      if (data.error) {
+        if (data.error.code === 403 || data.error.code === 429) {
+          lastError = new Error(data.error.message);
+          continue;
+        }
+        throw new Error(data.error.message);
+      }
+
+      const signatures = data.result || [];
+      const transactions: Transaction[] = signatures.map((sig: Record<string, unknown>) => ({
+        id: `solana-${sig.signature}`,
+        hash: sig.signature as string,
+        chain: "solana",
+        blockNumber: sig.slot as number,
+        timestamp: (sig.blockTime as number) || Date.now() / 1000,
+        from: address,
+        to: "",
+        value: "0",
+        fee: "0",
+        type: sig.err ? "unknown" : "transfer",
+        status: sig.err ? "failed" : "success",
+        tokenSymbol: "SOL",
+        raw: sig,
+      }));
+
+      return {
+        transactions,
+        totalCount: transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length === pageSize,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown error");
+      console.warn(`Solana RPC failed (${rpcUrl}), trying next...`);
+      continue;
+    }
   }
+
+  console.error("All Solana RPC endpoints failed:", lastError);
+  throw lastError || new Error("Failed to fetch Solana transactions");
 }
 
-// Bitcoin Fetcher via Blockchair
+// Bitcoin Fetcher with fallback
 async function fetchBitcoinTransactions(
   address: string,
   page: number = 1,
   pageSize: number = 50
 ): Promise<TransactionResponse> {
-  try {
-    const res = await fetch(
-      `https://api.blockchair.com/bitcoin/dashboards/address/${address}?limit=${pageSize}`
-    );
-    const data = await res.json();
+  const endpoints = CHAIN_ENDPOINTS.bitcoin;
+  let lastError: Error | null = null;
 
-    if (!data.data?.[address]) {
-      return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+  for (const baseUrl of endpoints) {
+    try {
+      let url: string;
+      if (baseUrl.includes("blockchair")) {
+        url = `${baseUrl}/dashboards/address/${address}?limit=${pageSize}`;
+      } else if (baseUrl.includes("blockchain.info")) {
+        url = `${baseUrl}/rawaddr/${address}?limit=${pageSize}`;
+      } else {
+        continue;
+      }
+
+      const res = await fetchWithTimeout(url);
+
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+
+      let transactions: Transaction[] = [];
+
+      if (baseUrl.includes("blockchair")) {
+        if (!data.data?.[address]) {
+          return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+        }
+        const addressData = data.data[address];
+        const txHashes = addressData.transactions || [];
+        transactions = txHashes.map((hash: string) => ({
+          id: `bitcoin-${hash}`,
+          hash,
+          chain: "bitcoin",
+          blockNumber: 0,
+          timestamp: Date.now() / 1000,
+          from: address,
+          to: "",
+          value: "0",
+          fee: "0",
+          type: "transfer" as TransactionType,
+          status: "success" as const,
+          tokenSymbol: "BTC",
+        }));
+      } else if (baseUrl.includes("blockchain.info")) {
+        const txs = data.txs || [];
+        transactions = txs.map((tx: Record<string, unknown>) => ({
+          id: `bitcoin-${tx.hash}`,
+          hash: tx.hash as string,
+          chain: "bitcoin",
+          blockNumber: (tx.block_height as number) || 0,
+          timestamp: (tx.time as number) || Date.now() / 1000,
+          from: address,
+          to: "",
+          value: "0",
+          fee: "0",
+          type: "transfer" as TransactionType,
+          status: "success" as const,
+          tokenSymbol: "BTC",
+          raw: tx,
+        }));
+      }
+
+      return {
+        transactions,
+        totalCount: transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length === pageSize,
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown error");
+      console.warn(`Bitcoin endpoint failed (${baseUrl}), trying next...`);
+      continue;
     }
-
-    const addressData = data.data[address];
-    const txHashes = addressData.transactions || [];
-
-    const transactions: Transaction[] = txHashes.map((hash: string) => ({
-      id: `bitcoin-${hash}`,
-      hash,
-      chain: "bitcoin",
-      blockNumber: 0,
-      timestamp: Date.now() / 1000,
-      from: address,
-      to: "",
-      value: "0",
-      fee: "0",
-      type: "transfer" as TransactionType,
-      status: "success" as const,
-      tokenSymbol: "BTC",
-    }));
-
-    return {
-      transactions,
-      totalCount: addressData.address?.transaction_count || transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    console.error("Error fetching Bitcoin transactions:", error);
-    throw error;
   }
+
+  console.error("All Bitcoin endpoints failed:", lastError);
+  throw lastError || new Error("Failed to fetch Bitcoin transactions");
 }
 
-// Polkadot/Bittensor via Subscan
+// Substrate (Polkadot/Bittensor) Fetcher
 async function fetchSubstrateTransactions(
   address: string,
   chainId: "polkadot" | "bittensor",
   page: number = 1,
   pageSize: number = 50
 ): Promise<TransactionResponse> {
-  const apiUrls: Record<string, string> = {
-    polkadot: "https://polkadot.api.subscan.io",
-    bittensor: "https://bittensor.api.subscan.io",
-  };
-
+  const endpoints = CHAIN_ENDPOINTS[chainId];
   const chain = CHAIN_MAP[chainId];
+  let lastError: Error | null = null;
 
-  try {
-    const res = await fetch(`${apiUrls[chainId]}/api/v2/scan/transfers`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, row: pageSize, page: page - 1 }),
-    });
+  for (const baseUrl of endpoints) {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/api/v2/scan/transfers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, row: pageSize, page: page - 1 }),
+      });
 
-    const data = await res.json();
-    if (data.code !== 0) throw new Error(data.message || "API error");
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        lastError = new Error("API returned non-JSON response");
+        continue;
+      }
 
-    const transfers = data.data?.transfers || [];
-    const transactions: Transaction[] = transfers.map((tx: Record<string, unknown>) => {
-      const value = parseFloat(tx.amount as string) / Math.pow(10, chain.decimals);
-      const fee = tx.fee ? parseFloat(tx.fee as string) / Math.pow(10, chain.decimals) : 0;
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        lastError = new Error("Invalid JSON response");
+        continue;
+      }
+
+      if (data.code !== 0) {
+        if (data.message?.includes("no data") || data.message?.includes("not found")) {
+          return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+        }
+        lastError = new Error(data.message || "API error");
+        continue;
+      }
+
+      const transfers = data.data?.transfers || [];
+      const transactions: Transaction[] = transfers.map((tx: Record<string, unknown>) => {
+        const value = parseFloat(tx.amount as string) / Math.pow(10, chain.decimals);
+        const fee = tx.fee ? parseFloat(tx.fee as string) / Math.pow(10, chain.decimals) : 0;
+
+        return {
+          id: `${chainId}-${tx.hash}-${tx.extrinsic_index}`,
+          hash: tx.hash as string,
+          chain: chainId,
+          blockNumber: tx.block_num as number,
+          timestamp: tx.block_timestamp as number,
+          from: tx.from as string,
+          to: tx.to as string,
+          value: value.toString(),
+          fee: fee.toString(),
+          type: "transfer" as TransactionType,
+          status: tx.success ? "success" : "failed",
+          tokenSymbol: (tx.asset_symbol as string) || chain.symbol,
+          raw: tx,
+        };
+      });
 
       return {
-        id: `${chainId}-${tx.hash}-${tx.extrinsic_index}`,
-        hash: tx.hash as string,
-        chain: chainId,
-        blockNumber: tx.block_num as number,
-        timestamp: tx.block_timestamp as number,
-        from: tx.from as string,
-        to: tx.to as string,
-        value: value.toString(),
-        fee: fee.toString(),
-        type: "transfer" as TransactionType,
-        status: tx.success ? "success" : "failed",
-        tokenSymbol: (tx.asset_symbol as string) || chain.symbol,
-        raw: tx,
+        transactions,
+        totalCount: data.data?.count || transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length === pageSize,
       };
-    });
-
-    return {
-      transactions,
-      totalCount: data.data?.count || transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    console.error(`Error fetching ${chainId} transactions:`, error);
-    throw error;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown error");
+      console.warn(`${chainId} endpoint failed, trying next...`);
+      continue;
+    }
   }
+
+  console.error(`All ${chainId} endpoints failed:`, lastError);
+  throw lastError || new Error(`Failed to fetch ${chainId} transactions`);
 }
 
-// Cosmos/Osmosis
+// Cosmos/Osmosis Fetcher with multiple endpoints
 async function fetchCosmosTransactions(
   address: string,
   chainId: "cosmos" | "osmosis",
   page: number = 1,
   pageSize: number = 50
 ): Promise<TransactionResponse> {
+  const endpoints = CHAIN_ENDPOINTS[chainId];
   const chain = CHAIN_MAP[chainId];
-  const chainName = chainId === "cosmos" ? "cosmos" : "osmosis";
+  let lastError: Error | null = null;
 
-  try {
-    const res = await fetch(
-      `https://lcd-${chainName}.cosmostation.io/cosmos/tx/v1beta1/txs?events=message.sender='${address}'&pagination.limit=${pageSize}&order_by=ORDER_BY_DESC`
-    );
+  for (const baseUrl of endpoints) {
+    try {
+      const url = `${baseUrl}/cosmos/tx/v1beta1/txs?events=message.sender='${address}'&pagination.limit=${pageSize}&order_by=ORDER_BY_DESC`;
 
-    const data = await res.json();
-    const txs = data.tx_responses || [];
+      const res = await fetchWithTimeout(url);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const transactions: Transaction[] = txs.map((tx: any) => {
-      const txBody = tx.tx?.body || {};
-      const msgs = txBody.messages || [];
-      let value = "0";
-      let to = "";
-      let type: TransactionType = "unknown";
-
-      for (const msg of msgs) {
-        const msgType = msg["@type"] || "";
-        if (msgType.includes("MsgSend")) {
-          type = "transfer";
-          to = msg.to_address || "";
-          const amounts = msg.amount || [];
-          if (amounts.length > 0) {
-            value = (parseFloat(amounts[0].amount) / Math.pow(10, chain.decimals)).toString();
-          }
-        } else if (msgType.includes("MsgDelegate")) type = "delegate";
-        else if (msgType.includes("MsgUndelegate")) type = "undelegate";
-        else if (msgType.includes("MsgWithdrawDelegatorReward")) type = "claim";
-        else if (msgType.includes("MsgSwap")) type = "swap";
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        lastError = new Error("API returned HTML instead of JSON");
+        continue;
       }
 
-      const feeAmount = tx.tx?.auth_info?.fee?.amount?.[0]?.amount || "0";
-      const fee = (parseFloat(feeAmount) / Math.pow(10, chain.decimals)).toString();
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const txs = data.tx_responses || [];
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const transactions: Transaction[] = txs.map((tx: any) => {
+        const txBody = tx.tx?.body || {};
+        const msgs = txBody.messages || [];
+        let value = "0";
+        let to = "";
+        let type: TransactionType = "unknown";
+
+        for (const msg of msgs) {
+          const msgType = msg["@type"] || "";
+          if (msgType.includes("MsgSend")) {
+            type = "transfer";
+            to = msg.to_address || "";
+            const amounts = msg.amount || [];
+            if (amounts.length > 0) {
+              value = (parseFloat(amounts[0].amount) / Math.pow(10, chain.decimals)).toString();
+            }
+          } else if (msgType.includes("MsgDelegate")) type = "delegate";
+          else if (msgType.includes("MsgUndelegate")) type = "undelegate";
+          else if (msgType.includes("MsgWithdrawDelegatorReward")) type = "claim";
+          else if (msgType.includes("MsgSwap")) type = "swap";
+        }
+
+        const feeAmount = tx.tx?.auth_info?.fee?.amount?.[0]?.amount || "0";
+        const fee = (parseFloat(feeAmount) / Math.pow(10, chain.decimals)).toString();
+
+        return {
+          id: `${chainId}-${tx.txhash}`,
+          hash: tx.txhash as string,
+          chain: chainId,
+          blockNumber: parseInt(tx.height as string),
+          timestamp: new Date(tx.timestamp as string).getTime() / 1000,
+          from: address,
+          to,
+          value,
+          fee,
+          type,
+          status: (tx.code as number) === 0 ? "success" : "failed",
+          tokenSymbol: chain.symbol,
+          gasUsed: tx.gas_used as string,
+          raw: tx,
+        };
+      });
 
       return {
-        id: `${chainId}-${tx.txhash}`,
-        hash: tx.txhash as string,
-        chain: chainId,
-        blockNumber: parseInt(tx.height as string),
-        timestamp: new Date(tx.timestamp as string).getTime() / 1000,
-        from: address,
-        to,
-        value,
-        fee,
-        type,
-        status: (tx.code as number) === 0 ? "success" : "failed",
-        tokenSymbol: chain.symbol,
-        gasUsed: tx.gas_used as string,
-        raw: tx,
+        transactions,
+        totalCount: parseInt(data.pagination?.total || "0") || transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length === pageSize,
       };
-    });
-
-    return {
-      transactions,
-      totalCount: parseInt(data.pagination?.total || "0") || transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    console.error(`Error fetching ${chainId} transactions:`, error);
-    throw error;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Unknown error");
+      console.warn(`${chainId} endpoint failed (${baseUrl}), trying next...`);
+      continue;
+    }
   }
+
+  console.error(`All ${chainId} endpoints failed:`, lastError);
+  throw lastError || new Error(`Failed to fetch from ${chainId}`);
 }
 
-// Ronin
-// Note: Ronin API is protected by Cloudflare and may not work from server-side
+// Ronin Fetcher
 async function fetchRoninTransactions(
   address: string,
   page: number = 1,
@@ -499,63 +692,67 @@ async function fetchRoninTransactions(
 ): Promise<TransactionResponse> {
   const cleanAddress = address.replace("ronin:", "0x");
   const chain = CHAIN_MAP["ronin"];
+  const endpoints = CHAIN_ENDPOINTS.ronin;
 
-  try {
-    // Use Ronin's Blockscout instance
-    const res = await fetch(
-      `https://explorer.roninchain.com/api/v2/addresses/${cleanAddress}/transactions`,
-      { headers: { Accept: "application/json" } }
-    );
+  for (const baseUrl of endpoints) {
+    try {
+      const res = await fetchWithTimeout(
+        `${baseUrl}/api/v2/addresses/${cleanAddress}/transactions`,
+        { headers: { Accept: "application/json" } }
+      );
 
-    if (!res.ok) {
-      // API may be blocked by Cloudflare
-      console.warn("Ronin API returned error - may be blocked by Cloudflare");
-      return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
-    }
+      if (!res.ok) {
+        console.warn("Ronin API returned error - may be blocked by Cloudflare");
+        return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+      }
 
-    // Check if response is HTML (Cloudflare challenge page)
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("text/html")) {
-      console.warn("Ronin API returned HTML - likely Cloudflare challenge");
-      return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
-    }
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/html")) {
+        console.warn("Ronin API returned HTML - likely Cloudflare challenge");
+        return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+      }
 
-    const data = await res.json();
-    const items = data.items || [];
+      const data = await res.json();
+      const items = data.items || [];
 
-    const transactions: Transaction[] = items.map((tx: Record<string, unknown>) => {
-      const valueWei = BigInt((tx.value as string) || "0");
-      const value = Number(valueWei) / Math.pow(10, chain.decimals);
+      const transactions: Transaction[] = items.map((tx: Record<string, unknown>) => {
+        const valueWei = BigInt((tx.value as string) || "0");
+        const value = Number(valueWei) / Math.pow(10, chain.decimals);
+
+        const fromObj = tx.from as { hash?: string } | undefined;
+        const toObj = tx.to as { hash?: string } | undefined;
+
+        return {
+          id: `ronin-${tx.hash}`,
+          hash: tx.hash as string,
+          chain: "ronin",
+          blockNumber: tx.block_number as number,
+          timestamp: tx.timestamp ? new Date(tx.timestamp as string).getTime() / 1000 : Date.now() / 1000,
+          from: fromObj?.hash || "",
+          to: toObj?.hash || "",
+          value: value.toString(),
+          fee: "0",
+          type: getTransactionType(tx.method as string, tx.value as string),
+          status: tx.status === "ok" ? "success" : "failed",
+          tokenSymbol: "RON",
+          raw: tx,
+        };
+      });
 
       return {
-        id: `ronin-${tx.hash}`,
-        hash: tx.hash as string,
-        chain: "ronin",
-        blockNumber: tx.block_number as number,
-        timestamp: tx.timestamp ? new Date(tx.timestamp as string).getTime() / 1000 : Date.now() / 1000,
-        from: (tx.from as { hash: string })?.hash || "",
-        to: (tx.to as { hash: string })?.hash || "",
-        value: value.toString(),
-        fee: "0",
-        type: getTransactionType(tx.method as string, tx.value as string),
-        status: tx.status === "ok" ? "success" : "failed",
-        tokenSymbol: "RON",
-        raw: tx,
+        transactions,
+        totalCount: transactions.length,
+        page,
+        pageSize,
+        hasMore: transactions.length === pageSize,
       };
-    });
-
-    return {
-      transactions,
-      totalCount: transactions.length,
-      page,
-      pageSize,
-      hasMore: transactions.length === pageSize,
-    };
-  } catch (error) {
-    // Don't throw - return empty result for Ronin since API is often blocked
-    console.warn("Error fetching Ronin transactions (API may be blocked):", error);
-    return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+    } catch (error) {
+      console.warn("Error fetching Ronin transactions (API may be blocked):", error);
+      return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
+    }
   }
+
+  return { transactions: [], totalCount: 0, page, pageSize, hasMore: false };
 }
 
 // Main fetch function
@@ -573,11 +770,9 @@ export async function fetchTransactions(
     case "arbitrum":
     case "optimism":
     case "base":
-      return fetchBlockscoutTransactions(address, chain, page, pageSize);
-
     case "bsc":
     case "avalanche":
-      return fetchEtherscanStyleTransactions(address, chain, page, pageSize);
+      return fetchEVMTransactions(address, chain, page, pageSize);
 
     case "solana":
       return fetchSolanaTransactions(address, page, pageSize);
