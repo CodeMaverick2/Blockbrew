@@ -134,59 +134,71 @@ export function AddressSidebar({
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              <AnimatePresence mode="popLayout">
+            <div className="flex-1 overflow-y-auto p-3 min-h-[200px]">
+              <AnimatePresence mode="wait">
                 {activeTab === "recent" ? (
-                  nonBookmarkedRecent.length > 0 ? (
-                    nonBookmarkedRecent.map((addr) => (
-                      <AddressItem
-                        key={`${addr.address}-${addr.chainId}`}
-                        address={addr}
-                        onSelect={handleSelect}
-                        onToggleBookmark={onToggleBookmark}
-                        onRemove={onRemoveRecent}
-                        onUpdateLabel={onUpdateLabel}
-                      />
-                    ))
-                  ) : (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-center py-12"
-                    >
-                      <History className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-                      <p className="text-muted-foreground text-sm">
-                        No recent searches
-                      </p>
-                      <p className="text-muted-foreground/60 text-xs mt-1">
-                        Your searches will appear here
-                      </p>
-                    </motion.div>
-                  )
-                ) : bookmarkedAddresses.length > 0 ? (
-                  bookmarkedAddresses.map((addr) => (
-                    <AddressItem
-                      key={`${addr.address}-${addr.chainId}`}
-                      address={addr}
-                      onSelect={handleSelect}
-                      onToggleBookmark={onRemoveBookmark}
-                      onRemove={onRemoveBookmark}
-                      onUpdateLabel={onUpdateLabel}
-                    />
-                  ))
+                  <motion.div
+                    key="recent"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 10 }}
+                    transition={{ duration: 0.15 }}
+                    className="space-y-2"
+                  >
+                    {nonBookmarkedRecent.length > 0 ? (
+                      nonBookmarkedRecent.map((addr) => (
+                        <AddressItem
+                          key={`${addr.address}-${addr.chainId}`}
+                          address={addr}
+                          onSelect={handleSelect}
+                          onToggleBookmark={onToggleBookmark}
+                          onRemove={onRemoveRecent}
+                          onUpdateLabel={onUpdateLabel}
+                        />
+                      ))
+                    ) : (
+                      <div className="text-center py-12">
+                        <History className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-muted-foreground text-sm">
+                          No recent searches
+                        </p>
+                        <p className="text-muted-foreground/60 text-xs mt-1">
+                          Your searches will appear here
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
                 ) : (
                   <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-center py-12"
+                    key="bookmarks"
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.15 }}
+                    className="space-y-2"
                   >
-                    <Bookmark className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-                    <p className="text-muted-foreground text-sm">
-                      No bookmarked addresses
-                    </p>
-                    <p className="text-muted-foreground/60 text-xs mt-1">
-                      Star addresses to save them
-                    </p>
+                    {bookmarkedAddresses.length > 0 ? (
+                      bookmarkedAddresses.map((addr) => (
+                        <AddressItem
+                          key={`${addr.address}-${addr.chainId}`}
+                          address={addr}
+                          onSelect={handleSelect}
+                          onToggleBookmark={onRemoveBookmark}
+                          onRemove={onRemoveBookmark}
+                          onUpdateLabel={onUpdateLabel}
+                        />
+                      ))
+                    ) : (
+                      <div className="text-center py-12">
+                        <Bookmark className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-muted-foreground text-sm">
+                          No bookmarked addresses
+                        </p>
+                        <p className="text-muted-foreground/60 text-xs mt-1">
+                          Star addresses to save them
+                        </p>
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
